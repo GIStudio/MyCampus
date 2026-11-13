@@ -567,6 +567,7 @@ export class CampusWorld {
 
   private buildingBaseHeight(polygon: PolygonData): number {
     if (!this.terrain) return 0;
+    if (Number.isFinite(polygon.baseElevation)) return polygon.baseElevation! - 0.03;
     const points = polygon.outer;
     const xs = points.map((point) => point[0]);
     const zs = points.map((point) => point[1]);

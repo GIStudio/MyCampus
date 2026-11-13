@@ -291,9 +291,10 @@ function polygonBounds(polygons) {
 }
 
 function sampleTerrain(terrain, [x, z]) {
-  const column = (x - terrain.minX) / (terrain.maxX - terrain.minX) * (terrain.columns - 1);
-  const row = (z - terrain.minZ) / (terrain.maxZ - terrain.minZ) * (terrain.rows - 1);
-  assert(column >= 0 && column <= terrain.columns - 1 && row >= 0 && row <= terrain.rows - 1);
+  const column = Math.max(0, Math.min(terrain.columns - 1,
+    (x - terrain.minX) / (terrain.maxX - terrain.minX) * (terrain.columns - 1)));
+  const row = Math.max(0, Math.min(terrain.rows - 1,
+    (z - terrain.minZ) / (terrain.maxZ - terrain.minZ) * (terrain.rows - 1)));
   const x0 = Math.floor(column);
   const y0 = Math.floor(row);
   const x1 = Math.min(x0 + 1, terrain.columns - 1);
@@ -326,6 +327,154 @@ function validateTerrain(terrain, bounds, spawn) {
   const spawnElevation = sampleTerrain(terrain, spawn);
   assert(Number.isFinite(spawnElevation) && spawnElevation >= terrain.minElevation && spawnElevation <= terrain.maxElevation);
   return spawnElevation;
+}
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function distanceToRing(point, ring) {
+  let distance = Infinity;
+  for (let index = 0; index < ring.length; index += 1) {
+    distance = Math.min(distance, distanceToSegment(point, ring[index], ring[(index + 1) % ring.length]));
+  }
+  return distance;
+}
+
+function segmentsIntersect(a, b, c, d) {
+  const orientation = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+  return orientation(a, b, c) !== orientation(a, b, d) && orientation(c, d, a) !== orientation(c, d, b);
+}
+
+function padsOverlap(a, b) {
+  if (a.minX > b.maxX + 16 || a.maxX + 16 < b.minX || a.minZ > b.maxZ + 16 || a.maxZ + 16 < b.minZ) return false;
+  if (pointInRing(a.outer[0], b.outer) || pointInRing(b.outer[0], a.outer)) return true;
+  for (let i = 0; i < a.outer.length; i += 1) {
+    for (let j = 0; j < b.outer.length; j += 1) {
+      if (segmentsIntersect(a.outer[i], a.outer[(i + 1) % a.outer.length], b.outer[j], b.outer[(j + 1) % b.outer.length])) return true;
+    }
+  }
+  return false;
+}
+
+function shareOverlappingPadElevations(pads) {
+  const parents = pads.map((_, index) => index);
+  const find = (index) => {
+    while (parents[index] !== index) {
+      parents[index] = parents[parents[index]];
+      index = parents[index];
+    }
+    return index;
+  };
+  for (let i = 0; i < pads.length; i += 1) {
+    for (let j = i + 1; j < pads.length; j += 1) {
+      if (!padsOverlap(pads[i], pads[j])) continue;
+      const a = find(i);
+      const b = find(j);
+      if (a !== b) parents[b] = a;
+    }
+  }
+  const groups = new Map();
+  pads.forEach((pad, index) => {
+    const root = find(index);
+    const group = groups.get(root) ?? [];
+    group.push(pad);
+    groups.set(root, group);
+  });
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const baseElevation = Math.round(median(group.map((pad) => pad.baseElevation)) * 10) / 10;
+    for (const pad of group) {
+      pad.baseElevation = baseElevation;
+      pad.polygon.baseElevation = baseElevation;
+    }
+  }
+}
+
+function buildingPadElevation(terrain, polygon) {
+  const ring = polygon.outer;
+  const samples = [sampleTerrain(terrain, ringCentroid(ring))];
+  for (let index = 0; index < ring.length; index += 1) {
+    const point = ring[index];
+    const next = ring[(index + 1) % ring.length];
+    const steps = Math.max(1, Math.ceil(Math.hypot(next[0] - point[0], next[1] - point[1]) / 5));
+    for (let step = 0; step < steps; step += 1) {
+      samples.push(sampleTerrain(terrain, [
+        point[0] + (next[0] - point[0]) * step / steps,
+        point[1] + (next[1] - point[1]) * step / steps,
+      ]));
+    }
+  }
+  const bounds = polygonBounds([polygon]);
+  const firstColumn = Math.max(0, Math.floor((bounds.minX - terrain.minX) / (terrain.maxX - terrain.minX) * (terrain.columns - 1)));
+  const lastColumn = Math.min(terrain.columns - 1, Math.ceil((bounds.maxX - terrain.minX) / (terrain.maxX - terrain.minX) * (terrain.columns - 1)));
+  const firstRow = Math.max(0, Math.floor((bounds.minZ - terrain.minZ) / (terrain.maxZ - terrain.minZ) * (terrain.rows - 1)));
+  const lastRow = Math.min(terrain.rows - 1, Math.ceil((bounds.maxZ - terrain.minZ) / (terrain.maxZ - terrain.minZ) * (terrain.rows - 1)));
+  for (let row = firstRow; row <= lastRow; row += 1) {
+    const z = terrain.minZ + (terrain.maxZ - terrain.minZ) * row / (terrain.rows - 1);
+    for (let column = firstColumn; column <= lastColumn; column += 1) {
+      const x = terrain.minX + (terrain.maxX - terrain.minX) * column / (terrain.columns - 1);
+      if (pointInRing([x, z], ring)) samples.push(terrain.heights[row * terrain.columns + column]);
+    }
+  }
+  return Math.round(median(samples) * 10) / 10;
+}
+
+function flattenBuildingPads(sourceTerrain, buildings) {
+  const bufferMetres = 8;
+  const pads = [];
+  for (const building of buildings) {
+    for (const [index, polygon] of building.polygons.entries()) {
+      const baseElevation = buildingPadElevation(sourceTerrain, polygon);
+      polygon.baseElevation = baseElevation;
+      const bounds = polygonBounds([polygon]);
+      pads.push({
+        id: `${building.id}:${index}`,
+        outer: polygon.outer,
+        polygon,
+        baseElevation,
+        minX: bounds.minX - bufferMetres,
+        maxX: bounds.maxX + bufferMetres,
+        minZ: bounds.minZ - bufferMetres,
+        maxZ: bounds.maxZ + bufferMetres,
+      });
+    }
+  }
+  pads.sort((a, b) => a.id.localeCompare(b.id));
+  shareOverlappingPadElevations(pads);
+
+  const heights = [...sourceTerrain.heights];
+  for (let row = 0; row < sourceTerrain.rows; row += 1) {
+    const z = sourceTerrain.minZ + (sourceTerrain.maxZ - sourceTerrain.minZ) * row / (sourceTerrain.rows - 1);
+    for (let column = 0; column < sourceTerrain.columns; column += 1) {
+      const x = sourceTerrain.minX + (sourceTerrain.maxX - sourceTerrain.minX) * column / (sourceTerrain.columns - 1);
+      const point = [x, z];
+      let selected = null;
+      for (const pad of pads) {
+        if (x < pad.minX || x > pad.maxX || z < pad.minZ || z > pad.maxZ) continue;
+        const inside = pointInRing(point, pad.outer);
+        const distance = inside ? 0 : distanceToRing(point, pad.outer);
+        if (distance >= bufferMetres) continue;
+        const t = distance / bufferMetres;
+        const weight = inside ? 1 : 1 - t * t * (3 - 2 * t);
+        if (!selected || weight > selected.weight) selected = { pad, weight };
+      }
+      if (!selected) continue;
+      const index = row * sourceTerrain.columns + column;
+      const original = sourceTerrain.heights[index];
+      heights[index] = Math.round((original + (selected.pad.baseElevation - original) * selected.weight) * 10) / 10;
+    }
+  }
+
+  return {
+    ...sourceTerrain,
+    heights,
+    minElevation: Math.min(...heights),
+    maxElevation: Math.max(...heights),
+    buildingPads: { count: pads.length, bufferMetres },
+  };
 }
 
 async function prepare(campus) {
@@ -532,10 +681,12 @@ async function prepare(campus) {
 
   if (campus.id === 'clear-water-bay') {
     const terrainPath = path.join(root, 'data', 'terrain', `${campus.id}.terrain.json`);
-    const terrain = JSON.parse(await readFile(terrainPath, 'utf8'));
+    const sourceTerrain = JSON.parse(await readFile(terrainPath, 'utf8'));
+    validateTerrain(sourceTerrain, bounds, spawn);
+    const terrain = flattenBuildingPads(sourceTerrain, buildings);
     const spawnElevation = validateTerrain(terrain, bounds, spawn);
     runtime.terrain = terrain;
-    console.log(`${campus.id}: terrain ${terrain.minElevation} to ${terrain.maxElevation} m; spawn ${spawnElevation.toFixed(1)} m`);
+    console.log(`${campus.id}: terrain ${terrain.minElevation} to ${terrain.maxElevation} m; ${terrain.buildingPads.count} building pads; spawn ${spawnElevation.toFixed(1)} m`);
   }
 
   await mkdir(path.join(root, 'data', 'geojson'), { recursive: true });

@@ -151,7 +151,7 @@ export class CampusMinimap {
     const [px, py] = this.project([x, z]);
     this.context.save();
     this.context.translate(px, py);
-    this.context.rotate(-rotation);
+    this.context.rotate(rotation);
     this.context.beginPath();
     this.context.moveTo(0, -7);
     this.context.lineTo(5, 5);

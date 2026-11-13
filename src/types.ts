@@ -3,6 +3,7 @@ export type Point = [number, number];
 export interface PolygonData {
   outer: Point[];
   holes: Point[][];
+  baseElevation?: number;
 }
 
 export interface BuildingData {
@@ -53,6 +54,7 @@ export interface TerrainData {
   zoom: number;
   tileUrls: string[];
   fetchedAt: string;
+  buildingPads?: { count: number; bufferMetres: number };
 }
 
 export interface CampusData {
