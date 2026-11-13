@@ -37,9 +37,10 @@ app.innerHTML = `
           <summary>数据说明</summary>
           <div class="data-popover">
             <strong>关于校园数据</strong>
-            <p>建筑、道路、绿地、水面与树木来自本地 OSM 快照。高度缺失时按层数或建筑类型估算；林地与广州校区的部分树木为程序示意，地形采用平面，不作为精确测绘依据。</p>
+            <p>建筑、道路、绿地、水面与树木来自本地 OSM 快照。高度缺失时按层数或建筑类型估算；林地与广州校区的部分树木为程序示意。清水湾地形使用公开高程数据重采样，广州校区采用平面，均不作为精确测绘依据。</p>
             <p id="data-stats">正在等待校区数据。</p>
             <p id="height-sources"></p>
+            <p id="terrain-stats" hidden></p>
             <span>树木 GLB 不可用时会自动使用低模树，不影响漫游。</span>
           </div>
         </details>
@@ -128,7 +129,7 @@ app.innerHTML = `
     </section>
 
     <footer class="attribution">
-      校园空间数据 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a>
+      校园空间数据 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a><span id="terrain-attribution" hidden> · 地形数据 <a href="https://github.com/tilezen/joerd" target="_blank" rel="noreferrer">Mapzen / Tilezen</a>（<a href="https://www.usgs.gov/centers/eros/science/usgs-eros-archive-digital-elevation-shuttle-radar-topography-mission-srtm-1" target="_blank" rel="noreferrer">USGS SRTM</a>）</span>
     </footer>
   </main>
 `;
@@ -204,6 +205,13 @@ function updateCampusUI(definition: CampusDefinition, data?: CampusData): void {
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   });
+  const terrain = definition.id === 'clear-water-bay' ? data?.terrain : undefined;
+  const terrainStats = element('terrain-stats');
+  terrainStats.hidden = !terrain;
+  element('terrain-attribution').hidden = !terrain;
+  if (terrain) {
+    terrainStats.textContent = `清水湾地形高程范围：${terrain.minElevation.toFixed(1)}–${terrain.maxElevation.toFixed(1)} 米（公开高程重采样）。`;
+  }
   if (!data) return;
   element('data-stats').textContent = `${data.buildings.length} 栋建筑记录 · ${data.roads.length} 条道路 · ${data.trees.length} 处树木位置`;
   const sources = [...new Set(data.buildings.map((building) => building.heightSource).filter(Boolean))];

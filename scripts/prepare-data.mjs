@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -289,6 +290,44 @@ function polygonBounds(polygons) {
   };
 }
 
+function sampleTerrain(terrain, [x, z]) {
+  const column = (x - terrain.minX) / (terrain.maxX - terrain.minX) * (terrain.columns - 1);
+  const row = (z - terrain.minZ) / (terrain.maxZ - terrain.minZ) * (terrain.rows - 1);
+  assert(column >= 0 && column <= terrain.columns - 1 && row >= 0 && row <= terrain.rows - 1);
+  const x0 = Math.floor(column);
+  const y0 = Math.floor(row);
+  const x1 = Math.min(x0 + 1, terrain.columns - 1);
+  const y1 = Math.min(y0 + 1, terrain.rows - 1);
+  const fx = column - x0;
+  const fy = row - y0;
+  const at = (columnIndex, rowIndex) => terrain.heights[rowIndex * terrain.columns + columnIndex];
+  const north = at(x0, y0) * (1 - fx) + at(x1, y0) * fx;
+  const south = at(x0, y1) * (1 - fx) + at(x1, y1) * fx;
+  return north * (1 - fy) + south * fy;
+}
+
+function validateTerrain(terrain, bounds, spawn) {
+  assert.equal(terrain.source, 'Mapzen/Tilezen Terrain Tiles (AWS Open Data)');
+  assert.equal(terrain.sourceUrl, 'https://registry.opendata.aws/terrain-tiles/');
+  assert.equal(terrain.attribution, 'SRTM data courtesy of the U.S. Geological Survey');
+  assert.equal(terrain.zoom, 15);
+  assert(Array.isArray(terrain.tileUrls) && terrain.tileUrls.length > 0 && terrain.tileUrls.every((url) => typeof url === 'string'));
+  assert(Number.isFinite(Date.parse(terrain.fetchedAt)));
+  assert.deepEqual({ minX: terrain.minX, maxX: terrain.maxX, minZ: terrain.minZ, maxZ: terrain.maxZ }, bounds);
+  assert(Number.isInteger(terrain.rows) && terrain.rows > 1);
+  assert(Number.isInteger(terrain.columns) && terrain.columns > 1);
+  assert.equal(terrain.heights.length, terrain.rows * terrain.columns);
+  assert(terrain.heights.every((height) => Number.isFinite(height) && Math.abs(height * 10 - Math.round(height * 10)) < 1e-8));
+  assert(Math.abs((terrain.maxX - terrain.minX) / (terrain.columns - 1) - 5) < 0.1);
+  assert(Math.abs((terrain.maxZ - terrain.minZ) / (terrain.rows - 1) - 5) < 0.1);
+  assert.equal(terrain.minElevation, Math.min(...terrain.heights));
+  assert.equal(terrain.maxElevation, Math.max(...terrain.heights));
+  assert(terrain.minElevation >= -100 && terrain.maxElevation <= 500);
+  const spawnElevation = sampleTerrain(terrain, spawn);
+  assert(Number.isFinite(spawnElevation) && spawnElevation >= terrain.minElevation && spawnElevation <= terrain.maxElevation);
+  return spawnElevation;
+}
+
 async function prepare(campus) {
   const snapshotPath = path.join(root, 'data', 'osm', `${campus.id}.osm.json`);
   const metadataPath = path.join(root, 'data', 'osm', `${campus.id}.meta.json`);
@@ -490,6 +529,14 @@ async function prepare(campus) {
       counts: { buildings: buildings.length, roads: roads.length, areas: areas.length, trees: trees.length },
     },
   };
+
+  if (campus.id === 'clear-water-bay') {
+    const terrainPath = path.join(root, 'data', 'terrain', `${campus.id}.terrain.json`);
+    const terrain = JSON.parse(await readFile(terrainPath, 'utf8'));
+    const spawnElevation = validateTerrain(terrain, bounds, spawn);
+    runtime.terrain = terrain;
+    console.log(`${campus.id}: terrain ${terrain.minElevation} to ${terrain.maxElevation} m; spawn ${spawnElevation.toFixed(1)} m`);
+  }
 
   await mkdir(path.join(root, 'data', 'geojson'), { recursive: true });
   await mkdir(path.join(root, 'public', 'data'), { recursive: true });

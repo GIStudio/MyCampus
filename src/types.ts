@@ -37,6 +37,24 @@ export interface TreeData {
   scale: number;
 }
 
+export interface TerrainData {
+  rows: number;
+  columns: number;
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  heights: number[];
+  minElevation: number;
+  maxElevation: number;
+  source: string;
+  sourceUrl: string;
+  attribution: string;
+  zoom: number;
+  tileUrls: string[];
+  fetchedAt: string;
+}
+
 export interface CampusData {
   id: string;
   name: string;
@@ -49,6 +67,7 @@ export interface CampusData {
   roads: RoadData[];
   areas: AreaData[];
   trees: TreeData[];
+  terrain?: TerrainData;
   spawn: Point;
   meta: unknown;
 }

@@ -84,7 +84,7 @@ export class RoamingController {
 
   reset(snapCamera = false): void {
     const spawn = this.world.resolveCollisions(this.world.data.spawn[0], this.world.data.spawn[1]);
-    this.avatar.group.position.set(spawn.x, 0, spawn.z);
+    this.avatar.group.position.set(spawn.x, this.world.groundHeightAt(spawn.x, spawn.z), spawn.z);
     this.avatar.group.rotation.y = 0;
     this.velocity.set(0, 0, 0);
     this.verticalVelocity = 0;
@@ -117,11 +117,15 @@ export class RoamingController {
     position.x = resolved.x;
     position.z = resolved.z;
 
-    if (!this.grounded || position.y > 0) {
+    const groundHeight = this.world.groundHeightAt(position.x, position.z);
+    if (this.grounded) {
+      position.y = groundHeight;
+      this.verticalVelocity = 0;
+    } else {
       this.verticalVelocity -= 20.5 * delta;
       position.y += this.verticalVelocity * delta;
-      if (position.y <= 0) {
-        position.y = 0;
+      if (position.y <= groundHeight) {
+        position.y = groundHeight;
         this.verticalVelocity = 0;
         this.grounded = true;
       }
@@ -146,6 +150,8 @@ export class RoamingController {
       const smoothed = this.camera.position.clone().lerp(clipped, 1 - Math.exp(-delta * 13));
       this.camera.position.copy(this.world.clipCamera(target, smoothed));
     }
+    const cameraFloor = this.world.groundHeightAt(this.camera.position.x, this.camera.position.z) + 0.3;
+    this.camera.position.y = Math.max(this.camera.position.y, cameraFloor);
     this.camera.lookAt(target);
   }
 

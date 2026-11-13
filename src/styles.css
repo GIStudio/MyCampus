@@ -266,6 +266,8 @@ kbd {
   padding-top: 42px;
   background: radial-gradient(circle at center, rgba(30,60,65,0.02), rgba(29,53,58,0.12));
 }
+#start-screen { pointer-events: none; background: none; }
+#start-screen .start-card { pointer-events: auto; }
 .start-card, .error-card {
   width: 500px;
   padding: 38px 40px 30px;

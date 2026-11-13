@@ -17,6 +17,9 @@ npm run dev
 - `npm run typecheck`：执行 TypeScript 类型检查。
 - `npm run build`：先类型检查，再生成 `dist/` 生产构建。
 - `npm run preview`：本地预览生产构建。
+- `npm run data:terrain`：使用已保存的 Terrarium PNG，离线重建清水湾地形网格。
+
+小地图右上角可展开为大地图；大地图支持校区切换，并可通过收起按钮、遮罩或 Esc 返回。清水湾包含公开高程重采样地形，广州校区使用平面。
 
 ## 数据刷新
 
@@ -25,7 +28,7 @@ npm run data:fetch
 npm run data:build
 ```
 
-`data:fetch` 获取并保存原始校园数据；`data:build` 将原始数据转换为前端使用的数据。部署工作流只执行 `data:build`，因此原始数据更新后应随项目一并提交。
+`data:fetch` 获取并保存原始 OSM 校园数据及清水湾 Terrarium 高程瓦片；`data:build` 离线转换为前端使用的数据。部署工作流只执行 `data:build`，因此原始快照和瓦片更新后应随项目一并提交。
 
 ## 部署
 

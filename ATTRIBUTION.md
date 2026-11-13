@@ -24,7 +24,18 @@
 - 获取时间：2026-11-13T05:36:43.622Z
 - 本地快照：`data/osm/guangzhou.osm.json`
 
-建筑高度优先使用 OSM `height`，其次按 `building:levels × 3m` 估算，最后使用建筑类型默认值。`source=generated` 的树木是确定性程序示意，不是测绘树位；场景使用平坦地形。
+建筑高度优先使用 OSM `height`，其次按 `building:levels × 3m` 估算，最后使用建筑类型默认值。`source=generated` 的树木是确定性程序示意，不是测绘树位。广州校区使用平面地形，清水湾使用下述公开高程数据。
+
+## 清水湾地形
+
+- 数据集：Mapzen / Tilezen Terrain Tiles，由 AWS Open Data 托管
+- 数据集说明：https://registry.opendata.aws/terrain-tiles/
+- 来源与许可说明：https://github.com/tilezen/joerd/blob/master/docs/attribution.md
+- 高程署名：SRTM data courtesy of the U.S. Geological Survey
+- 原始数据：zoom 15 Terrarium PNG，保存于 `data/terrain/tiles/`
+- 派生数据：`data/terrain/clear-water-bay.terrain.json`，获取时间记录于文件内
+
+原始 RGB 按 Terrarium 公式解码为米制高程，双线性重采样为约 5 米网格。异常深负值使用邻域插值修复，近海负高程归零；原始 PNG 不修改。该地形用于风格化漫游，不是测绘级地形或建筑基础高程。
 
 ## 低模树木
 

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { assetUrl, treeAssetPaths } from './data';
-import type { CampusData, Point, PolygonData, TreeData, WorldStats } from './types';
+import type { CampusData, Point, PolygonData, TerrainData, TreeData, WorldStats } from './types';
 
 interface Footprint {
   polygon: PolygonData;
@@ -72,22 +72,61 @@ function shapeFromPolygon(polygon: PolygonData): THREE.Shape | null {
   return shape;
 }
 
-function createRibbon(points: Point[], width: number, y: number): THREE.BufferGeometry | null {
+function usableTerrain(terrain: TerrainData | undefined): terrain is TerrainData {
+  return Boolean(
+    terrain &&
+    Number.isInteger(terrain.rows) && terrain.rows >= 2 &&
+    Number.isInteger(terrain.columns) && terrain.columns >= 2 &&
+    Number.isFinite(terrain.minX) && Number.isFinite(terrain.maxX) && terrain.minX < terrain.maxX &&
+    Number.isFinite(terrain.minZ) && Number.isFinite(terrain.maxZ) && terrain.minZ < terrain.maxZ &&
+    Array.isArray(terrain.heights) && terrain.heights.length === terrain.rows * terrain.columns &&
+    terrain.heights.every(Number.isFinite)
+  );
+}
+
+function densifyPoints(points: Point[], maxSegmentLength: number): Point[] {
+  const result: Point[] = [points[0]];
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const point = points[index];
+    const steps = Math.max(1, Math.ceil(Math.hypot(point[0] - previous[0], point[1] - previous[1]) / maxSegmentLength));
+    for (let step = 1; step <= steps; step += 1) {
+      const t = step / steps;
+      result.push([
+        THREE.MathUtils.lerp(previous[0], point[0], t),
+        THREE.MathUtils.lerp(previous[1], point[1], t),
+      ]);
+    }
+  }
+  return result;
+}
+
+function createRibbon(
+  points: Point[],
+  width: number,
+  y: number,
+  heightAt?: (x: number, z: number) => number,
+): THREE.BufferGeometry | null {
   if (points.length < 2) return null;
   const positions: number[] = [];
   const indices: number[] = [];
   const halfWidth = Math.max(0.5, width) / 2;
-  points.forEach((point, index) => {
-    const previous = points[Math.max(0, index - 1)];
-    const next = points[Math.min(points.length - 1, index + 1)];
+  const ribbonPoints = heightAt ? densifyPoints(points, 8) : points;
+  ribbonPoints.forEach((point, index) => {
+    const previous = ribbonPoints[Math.max(0, index - 1)];
+    const next = ribbonPoints[Math.min(ribbonPoints.length - 1, index + 1)];
     const dx = next[0] - previous[0];
     const dz = next[1] - previous[1];
     const length = Math.hypot(dx, dz) || 1;
     const nx = -dz / length;
     const nz = dx / length;
-    positions.push(point[0] + nx * halfWidth, y, point[1] + nz * halfWidth);
-    positions.push(point[0] - nx * halfWidth, y, point[1] - nz * halfWidth);
-    if (index < points.length - 1) {
+    const leftX = point[0] + nx * halfWidth;
+    const leftZ = point[1] + nz * halfWidth;
+    const rightX = point[0] - nx * halfWidth;
+    const rightZ = point[1] - nz * halfWidth;
+    positions.push(leftX, (heightAt?.(leftX, leftZ) ?? 0) + y, leftZ);
+    positions.push(rightX, (heightAt?.(rightX, rightZ) ?? 0) + y, rightZ);
+    if (index < ribbonPoints.length - 1) {
       const offset = index * 2;
       indices.push(offset, offset + 2, offset + 1, offset + 2, offset + 3, offset + 1);
     }
@@ -95,6 +134,58 @@ function createRibbon(points: Point[], width: number, y: number): THREE.BufferGe
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function createTerrainAreaGeometry(
+  shape: THREE.Shape,
+  heightAt: (x: number, z: number) => number,
+  yOffset: number,
+): THREE.BufferGeometry {
+  const flatGeometry = new THREE.ShapeGeometry(shape);
+  flatGeometry.rotateX(-Math.PI / 2);
+  const source = flatGeometry.index ? flatGeometry.toNonIndexed() : flatGeometry;
+  if (source !== flatGeometry) flatGeometry.dispose();
+  const attribute = source.getAttribute('position');
+  const positions: number[] = [];
+  const maxEdgeLength = 10;
+
+  const emitTriangle = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, depth: number): void => {
+    const ab = Math.hypot(a.x - b.x, a.z - b.z);
+    const bc = Math.hypot(b.x - c.x, b.z - c.z);
+    const ca = Math.hypot(c.x - a.x, c.z - a.z);
+    const longest = Math.max(ab, bc, ca);
+    if (longest <= maxEdgeLength || depth >= 12) {
+      for (const point of [a, b, c]) {
+        positions.push(point.x, heightAt(point.x, point.z) + yOffset, point.z);
+      }
+      return;
+    }
+    if (longest === ab) {
+      const midpoint = a.clone().add(b).multiplyScalar(0.5);
+      emitTriangle(a, midpoint, c, depth + 1);
+      emitTriangle(midpoint, b, c, depth + 1);
+    } else if (longest === bc) {
+      const midpoint = b.clone().add(c).multiplyScalar(0.5);
+      emitTriangle(a, b, midpoint, depth + 1);
+      emitTriangle(a, midpoint, c, depth + 1);
+    } else {
+      const midpoint = c.clone().add(a).multiplyScalar(0.5);
+      emitTriangle(a, b, midpoint, depth + 1);
+      emitTriangle(midpoint, b, c, depth + 1);
+    }
+  };
+
+  for (let index = 0; index < attribute.count; index += 3) {
+    const a = new THREE.Vector3().fromBufferAttribute(attribute, index);
+    const b = new THREE.Vector3().fromBufferAttribute(attribute, index + 1);
+    const c = new THREE.Vector3().fromBufferAttribute(attribute, index + 2);
+    emitTriangle(a, b, c, 0);
+  }
+  source.dispose();
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -110,6 +201,7 @@ export class CampusWorld {
   readonly buildingMeshes: THREE.Mesh[] = [];
   readonly stats: WorldStats = { buildings: 0, trees: 0, fallbackTrees: 0 };
   private readonly root = new THREE.Group();
+  private readonly terrain: TerrainData | null;
   private readonly footprints: Footprint[] = [];
   private readonly colliderGrid = new Map<string, number[]>();
   private readonly raycaster = new THREE.Raycaster();
@@ -119,6 +211,7 @@ export class CampusWorld {
   private disposed = false;
 
   constructor(readonly data: CampusData) {
+    this.terrain = usableTerrain(data.terrain) ? data.terrain : null;
     this.scene.background = new THREE.Color(0xc4dce2);
     const size = Math.max(data.bounds.maxX - data.bounds.minX, data.bounds.maxZ - data.bounds.minZ);
     this.scene.fog = new THREE.FogExp2(0xd4e2df, Math.min(0.0022, 1.35 / Math.max(size, 500)));
@@ -147,6 +240,30 @@ export class CampusWorld {
     this.buildRoads();
     this.buildBuildings();
     this.buildBoundary();
+  }
+
+  groundHeightAt(x: number, z: number): number {
+    const terrain = this.terrain;
+    if (!terrain) return 0;
+    const column = THREE.MathUtils.clamp((x - terrain.minX) / (terrain.maxX - terrain.minX), 0, 1) * (terrain.columns - 1);
+    const row = THREE.MathUtils.clamp((z - terrain.minZ) / (terrain.maxZ - terrain.minZ), 0, 1) * (terrain.rows - 1);
+    const column0 = Math.floor(column);
+    const row0 = Math.floor(row);
+    const column1 = Math.min(column0 + 1, terrain.columns - 1);
+    const row1 = Math.min(row0 + 1, terrain.rows - 1);
+    const columnMix = column - column0;
+    const rowMix = row - row0;
+    const north = THREE.MathUtils.lerp(
+      terrain.heights[row0 * terrain.columns + column0],
+      terrain.heights[row0 * terrain.columns + column1],
+      columnMix,
+    );
+    const south = THREE.MathUtils.lerp(
+      terrain.heights[row1 * terrain.columns + column0],
+      terrain.heights[row1 * terrain.columns + column1],
+      columnMix,
+    );
+    return THREE.MathUtils.lerp(north, south, rowMix);
   }
 
   async buildTrees(): Promise<void> {
@@ -207,7 +324,7 @@ export class CampusWorld {
         const centering = new THREE.Matrix4().makeTranslation(-center.x, -box.min.y, -center.z);
         const normalization = new THREE.Matrix4().makeScale(scale, scale, scale).multiply(centering);
         const placement = new THREE.Matrix4().compose(
-          new THREE.Vector3(tree.position[0], 0, tree.position[1]),
+          new THREE.Vector3(tree.position[0], this.groundHeightAt(tree.position[0], tree.position[1]), tree.position[1]),
           new THREE.Quaternion().setFromAxisAngle(UP, hashRotation(tree.id || `${variant}-${index}`)),
           new THREE.Vector3(1, 1, 1),
         );
@@ -236,7 +353,7 @@ export class CampusWorld {
     trees.forEach((tree, index) => {
       const scale = Number.isFinite(tree.scale) && tree.scale > 0 ? tree.scale : 1;
       const matrix = new THREE.Matrix4().compose(
-        new THREE.Vector3(tree.position[0], 0, tree.position[1]),
+        new THREE.Vector3(tree.position[0], this.groundHeightAt(tree.position[0], tree.position[1]), tree.position[1]),
         new THREE.Quaternion().setFromAxisAngle(UP, hashRotation(tree.id)),
         new THREE.Vector3(scale, scale, scale),
       );
@@ -290,6 +407,10 @@ export class CampusWorld {
   }
 
   private buildGround(): void {
+    if (this.terrain) {
+      this.buildTerrain(this.terrain);
+      return;
+    }
     const { minX, maxX, minZ, maxZ } = this.data.bounds;
     const width = maxX - minX;
     const depth = maxZ - minZ;
@@ -314,6 +435,35 @@ export class CampusWorld {
     this.root.add(grid);
   }
 
+  private buildTerrain(terrain: TerrainData): void {
+    const positions: number[] = [];
+    const indices: number[] = [];
+    for (let row = 0; row < terrain.rows; row += 1) {
+      const z = THREE.MathUtils.lerp(terrain.minZ, terrain.maxZ, row / (terrain.rows - 1));
+      for (let column = 0; column < terrain.columns; column += 1) {
+        const x = THREE.MathUtils.lerp(terrain.minX, terrain.maxX, column / (terrain.columns - 1));
+        positions.push(x, terrain.heights[row * terrain.columns + column], z);
+        if (row < terrain.rows - 1 && column < terrain.columns - 1) {
+          const a = row * terrain.columns + column;
+          const b = a + terrain.columns;
+          const c = a + 1;
+          const d = b + 1;
+          indices.push(a, b, c, b, d, c);
+        }
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    const ground = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({ color: 0xe5e7dc, roughness: 0.96, metalness: 0 }),
+    );
+    ground.receiveShadow = true;
+    this.root.add(ground);
+  }
+
   private buildAreas(): void {
     const materials: Record<string, THREE.MeshStandardMaterial> = {
       water: new THREE.MeshPhysicalMaterial({
@@ -329,14 +479,22 @@ export class CampusWorld {
       pedestrian: new THREE.MeshStandardMaterial({ color: 0xeee4d2, roughness: 0.94 }),
       wood: new THREE.MeshStandardMaterial({ color: 0xbd9675, roughness: 0.88 }),
     };
+    const heightAt = this.terrain ? (x: number, z: number): number => this.groundHeightAt(x, z) : undefined;
     for (const area of this.data.areas) {
+      if (heightAt && (area.kind === 'grass' || area.kind === 'wood')) continue;
       const material = materials[area.kind] ?? materials.grass;
       for (const polygon of area.polygons) {
         const shape = shapeFromPolygon(polygon);
         if (!shape) continue;
-        const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), material);
-        mesh.rotation.x = -Math.PI / 2;
-        mesh.position.y = area.kind === 'water' ? 0.005 : 0.015;
+        const yOffset = area.kind === 'water' ? 0.005 : 0.015;
+        const geometry = heightAt
+          ? createTerrainAreaGeometry(shape, heightAt, yOffset)
+          : new THREE.ShapeGeometry(shape);
+        const mesh = new THREE.Mesh(geometry, material);
+        if (!heightAt) {
+          mesh.rotation.x = -Math.PI / 2;
+          mesh.position.y = yOffset;
+        }
         mesh.receiveShadow = true;
         this.root.add(mesh);
       }
@@ -345,6 +503,7 @@ export class CampusWorld {
 
   private buildRoads(): void {
     const materials = new Map<string, THREE.MeshStandardMaterial>();
+    const heightAt = this.terrain ? (x: number, z: number): number => this.groundHeightAt(x, z) : undefined;
     for (const road of this.data.roads) {
       const key = road.kind || 'road';
       let material = materials.get(key);
@@ -359,7 +518,7 @@ export class CampusWorld {
         materials.set(key, material);
       }
       const y = 0.035 + Math.max(0, road.layer || 0) * 0.08;
-      const geometry = createRibbon(road.points, road.width, y);
+      const geometry = createRibbon(road.points, road.width, y, heightAt);
       if (!geometry) continue;
       const mesh = new THREE.Mesh(geometry, material);
       mesh.receiveShadow = true;
@@ -394,6 +553,7 @@ export class CampusWorld {
         });
         geometry.rotateX(-Math.PI / 2);
         const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.y = this.buildingBaseHeight(polygon);
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         mesh.userData.buildingName = building.name;
@@ -403,6 +563,27 @@ export class CampusWorld {
         this.stats.buildings += 1;
       }
     }
+  }
+
+  private buildingBaseHeight(polygon: PolygonData): number {
+    if (!this.terrain) return 0;
+    const points = polygon.outer;
+    const xs = points.map((point) => point[0]);
+    const zs = points.map((point) => point[1]);
+    let lowest = this.groundHeightAt((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...zs) + Math.max(...zs)) / 2);
+    for (let index = 0; index < points.length; index += 1) {
+      const point = points[index];
+      const next = points[(index + 1) % points.length];
+      const steps = Math.max(1, Math.ceil(Math.hypot(next[0] - point[0], next[1] - point[1]) / 8));
+      for (let step = 0; step < steps; step += 1) {
+        const t = step / steps;
+        lowest = Math.min(lowest, this.groundHeightAt(
+          THREE.MathUtils.lerp(point[0], next[0], t),
+          THREE.MathUtils.lerp(point[1], next[1], t),
+        ));
+      }
+    }
+    return lowest - 0.16;
   }
 
   private addFootprint(polygon: PolygonData): void {
@@ -436,8 +617,11 @@ export class CampusWorld {
 
   private buildBoundary(): void {
     if (this.data.campus.length < 2) return;
-    const points = this.data.campus.map(([x, z]) => new THREE.Vector3(x, 0.09, z));
-    points.push(points[0].clone());
+    const outline = this.terrain
+      ? densifyPoints([...this.data.campus, this.data.campus[0]], 8)
+      : this.data.campus;
+    const points = outline.map(([x, z]) => new THREE.Vector3(x, this.groundHeightAt(x, z) + 0.09, z));
+    if (!this.terrain) points.push(points[0].clone());
     const line = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(points),
       new THREE.LineBasicMaterial({ color: 0x65bec1, transparent: true, opacity: 0.48 }),
