@@ -1,0 +1,17 @@
+{
+  "id": "clear-water-bay",
+  "name": "HKUST Clear Water Bay",
+  "source": "OpenStreetMap API 0.6 map.json",
+  "sourceUrl": "https://api.openstreetmap.org/api/0.6/map.json?bbox=114.2615,22.3317,114.27,22.3405",
+  "fetchedAt": "2026-11-13T05:36:43.937Z",
+  "bbox": {
+    "south": 22.3317,
+    "west": 114.2615,
+    "north": 22.3405,
+    "east": 114.27
+  },
+  "boundaryId": "way/40664120",
+  "elementCount": 6712,
+  "osmBase": null,
+  "generator": "openstreetmap-cgimap 2.1.1 (2691680 spike-07.openstreetmap.org)"
+}

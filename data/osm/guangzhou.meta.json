@@ -1,0 +1,17 @@
+{
+  "id": "guangzhou",
+  "name": "HKUST(GZ)",
+  "source": "OpenStreetMap API 0.6 map.json",
+  "sourceUrl": "https://api.openstreetmap.org/api/0.6/map.json?bbox=113.4708,22.8829,113.4874,22.9008",
+  "fetchedAt": "2026-11-13T05:36:43.622Z",
+  "bbox": {
+    "south": 22.8829,
+    "west": 113.4708,
+    "north": 22.9008,
+    "east": 113.4874
+  },
+  "boundaryId": "way/894157108",
+  "elementCount": 4388,
+  "osmBase": null,
+  "generator": "openstreetmap-cgimap 2.1.1 (2704474 spike-07.openstreetmap.org)"
+}

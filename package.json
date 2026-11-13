@@ -1,0 +1,29 @@
+{
+  "name": "mycampus",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "data:fetch": "node scripts/fetch-osm.mjs",
+    "data:build": "node scripts/prepare-data.mjs"
+  },
+  "dependencies": {
+    "osmtogeojson": "^3.0.0-beta.5",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/osmtogeojson": "^2.2.34",
+    "@types/three": "^0.187.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "0.8.15"
+  }
+}
