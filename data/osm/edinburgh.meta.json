@@ -1,0 +1,17 @@
+{
+  "id": "edinburgh",
+  "name": "University of Edinburgh",
+  "source": "OpenStreetMap API 0.6 map.json",
+  "sourceUrl": "https://api.openstreetmap.org/api/0.6/map.json?bbox=-3.1932,55.9408,-3.1823,55.9473",
+  "fetchedAt": "2026-11-13T09:37:23.464Z",
+  "bbox": {
+    "south": 55.9408,
+    "west": -3.1932,
+    "north": 55.9473,
+    "east": -3.1823
+  },
+  "boundaryId": "way/9529767",
+  "elementCount": 13737,
+  "osmBase": null,
+  "generator": "openstreetmap-cgimap 2.1.1 (2638734 spike-06.openstreetmap.org)"
+}

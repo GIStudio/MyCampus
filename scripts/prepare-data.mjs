@@ -31,6 +31,22 @@ const campuses = [
     bbox: [22.8829, 113.4708, 22.9008, 113.4874],
     filterBuildingsToCampus: true,
   },
+  {
+    id: 'edinburgh',
+    name: 'University of Edinburgh',
+    shortName: 'Edinburgh',
+    boundaryId: 'way/9529767',
+    bbox: [55.9408, -3.1932, 55.9473, -3.1823],
+    filterBuildingsToCampus: true,
+  },
+  {
+    id: 'cug-wuhan',
+    name: 'China University of Geosciences (Wuhan)',
+    shortName: 'CUG Wuhan',
+    boundaryId: 'relation/10790904',
+    bbox: [30.5165, 114.3893, 30.5341, 114.4044],
+    filterBuildingsToCampus: true,
+  },
 ];
 
 const EARTH_RADIUS = 6378137;
@@ -310,7 +326,7 @@ function sampleTerrain(terrain, [x, z]) {
 function validateTerrain(terrain, bounds, spawn) {
   assert.equal(terrain.source, 'Mapzen/Tilezen Terrain Tiles (AWS Open Data)');
   assert.equal(terrain.sourceUrl, 'https://registry.opendata.aws/terrain-tiles/');
-  assert.equal(terrain.attribution, 'SRTM data courtesy of the U.S. Geological Survey');
+  assert(typeof terrain.attribution === 'string' && terrain.attribution.length > 0);
   assert.equal(terrain.zoom, 15);
   assert(Array.isArray(terrain.tileUrls) && terrain.tileUrls.length > 0 && terrain.tileUrls.every((url) => typeof url === 'string'));
   assert(Number.isFinite(Date.parse(terrain.fetchedAt)));
@@ -679,7 +695,7 @@ async function prepare(campus) {
     },
   };
 
-  if (campus.id === 'clear-water-bay') {
+  if (campus.id !== 'guangzhou') {
     const terrainPath = path.join(root, 'data', 'terrain', `${campus.id}.terrain.json`);
     const sourceTerrain = JSON.parse(await readFile(terrainPath, 'utf8'));
     validateTerrain(sourceTerrain, bounds, spawn);

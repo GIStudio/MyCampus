@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import './styles.css';
-import { CAMPUSES, loadCampus } from './data';
+import { cacheCampus, CAMPUSES, loadCampus, readCachedCampus } from './data';
 import { RoamingController } from './controls';
 import { CampusMinimap } from './minimap';
+import { buildOnlineCampus } from './online';
+import { createCustomSchool, deleteCustomSchool, getAllSchools, getCustomSchools, saveCustomSchool } from './schools';
 import type { CampusData, CampusDefinition } from './types';
 import { CampusWorld } from './world';
 
@@ -12,32 +14,29 @@ const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('缺少 #app 挂载节点');
 
 app.innerHTML = `
-  <main class="experience" aria-label="MyCampus 双校区 3D 漫游">
+  <main class="experience" aria-label="MyCampus 全球校园 3D 漫游">
     <div id="viewport" class="viewport"></div>
     <div class="ambient-glow" aria-hidden="true"></div>
 
     <header class="topbar">
       <a class="brand" href="#" aria-label="MyCampus 首页">
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span><strong>MyCampus</strong><small>双校园 · 自由漫游</small></span>
+        <span><strong>MyCampus</strong><small>全球校园 · 自由漫游</small></span>
       </a>
-      <nav class="campus-switch" aria-label="切换校区">
-        ${CAMPUSES.map((campus, index) => `
-          <button type="button" class="campus-button${index === 0 ? ' active' : ''}" data-campus="${campus.id}" aria-pressed="${index === 0}">
-            <span class="campus-dot" aria-hidden="true"></span>${campus.shortName}
-          </button>
-        `).join('')}
-      </nav>
+      <button id="open-schools" class="school-directory-button" type="button" aria-haspopup="dialog" aria-controls="school-dialog">
+        学校目录 <span id="school-count">4</span>
+      </button>
       <div class="topbar-meta">
         <div class="campus-status">
           <span id="current-campus">香港科技大学（清水湾）</span>
           <span class="status-line"><i id="status-dot"></i><span id="status-text" role="status">正在载入</span></span>
         </div>
+        <button id="refresh-campus" class="online-refresh-button" type="button" title="重新在线获取当前学校的 OSM 与地形数据">在线更新</button>
         <details class="data-details">
           <summary>数据说明</summary>
           <div class="data-popover">
             <strong>关于校园数据</strong>
-            <p>建筑、道路、绿地、水面与树木来自本地 OSM 快照。高度缺失时按层数或建筑类型估算；林地与广州校区的部分树木为程序示意。清水湾地形使用公开高程数据重采样，广州校区采用平面，均不作为精确测绘依据。</p>
+            <p>建筑、道路、绿地、水面与树木来自 OSM。高度缺失时按层数或建筑类型估算；部分树木为程序示意。支持地形的校区使用公开高程重采样，广州校区采用平面。自定义学校会在线获取 OSM 与地形，并将列表和构建结果保存在当前浏览器中。</p>
             <p id="data-stats">正在等待校区数据。</p>
             <p id="height-sources"></p>
             <p id="terrain-stats" hidden></p>
@@ -72,19 +71,35 @@ app.innerHTML = `
           <h2 id="map-dialog-title">清水湾校园地图</h2>
           <span class="north"><b>↑</b> N</span>
         </div>
-        <nav class="campus-switch map-dialog-switch" aria-label="在大地图中切换校区">
-          ${CAMPUSES.map((campus, index) => `
-            <button type="button" class="campus-button${index === 0 ? ' active' : ''}" data-campus="${campus.id}" aria-pressed="${index === 0}">
-              <span class="campus-dot" aria-hidden="true"></span>${campus.shortName}
-            </button>
-          `).join('')}
-        </nav>
+        <button id="map-open-schools" class="map-toggle-button map-collapse-button map-dialog-switch" type="button" aria-haspopup="dialog" aria-controls="school-dialog">更换学校</button>
         <button id="collapse-map" class="map-toggle-button map-collapse-button" type="button" aria-label="收起校园大地图" aria-controls="campus-map-dialog" autofocus>
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7h4V3M17 7h-4V3M3 13h4v4M17 13h-4v4"/></svg>
           <span>收起</span>
         </button>
       </div>
       <div id="map-dialog-body" class="map-dialog-body"></div>
+    </dialog>
+
+    <dialog id="school-dialog" class="school-dialog" aria-labelledby="school-dialog-title">
+      <div class="school-dialog-header">
+        <div><span class="eyebrow">CAMPUS LIBRARY</span><h2 id="school-dialog-title">选择一所学校</h2></div>
+        <button id="close-schools" class="map-toggle-button" type="button" aria-label="关闭学校目录">关闭</button>
+      </div>
+      <div class="school-dialog-body">
+        <div id="school-list" class="school-list"></div>
+        <details class="custom-school-section">
+          <summary>添加任意学校</summary>
+          <p>输入学校中心经纬度与覆盖半径，在线获取 OSM 建筑、道路和公开地形。学校列表及构建结果仅保存在当前浏览器。</p>
+          <form id="custom-school-form" class="custom-school-form">
+            <label class="school-name-field">学校名称<input id="custom-school-name" name="name" required maxlength="60" placeholder="例如：清华大学" autocomplete="off"></label>
+            <label>中心纬度<input name="lat" type="number" required min="-80" max="80" step="any" placeholder="39.999"></label>
+            <label>中心经度<input name="lon" type="number" required min="-180" max="180" step="any" placeholder="116.326"></label>
+            <label>覆盖半径（米）<input name="radius" type="number" required min="150" max="1000" step="50" value="600"></label>
+            <button class="primary-button" type="submit">在线获取并构建</button>
+            <span id="school-form-status" class="school-form-status" role="status"></span>
+          </form>
+        </details>
+      </div>
     </dialog>
 
     <div class="control-hints" aria-label="操作提示">
@@ -101,7 +116,7 @@ app.innerHTML = `
 
     <section id="start-screen" class="center-overlay" aria-labelledby="start-title" hidden>
       <div class="start-card">
-        <span class="eyebrow">HKUST · DUAL CAMPUS</span>
+        <span class="eyebrow">MYCAMPUS · OPEN WORLD</span>
         <h1 id="start-title">走进校园，换一种视角</h1>
         <p id="start-description">在清水湾的山海之间，开始一段自由漫游。</p>
         <button id="start-button" class="primary-button" type="button">
@@ -129,7 +144,7 @@ app.innerHTML = `
     </section>
 
     <footer class="attribution">
-      校园空间数据 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a><span id="terrain-attribution" hidden> · 地形数据 <a href="https://github.com/tilezen/joerd" target="_blank" rel="noreferrer">Mapzen / Tilezen</a>（<a href="https://www.usgs.gov/centers/eros/science/usgs-eros-archive-digital-elevation-shuttle-radar-topography-mission-srtm-1" target="_blank" rel="noreferrer">USGS SRTM</a>）</span>
+      校园空间数据 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a><span id="terrain-attribution" hidden> · 地形数据 <a href="https://github.com/tilezen/joerd" target="_blank" rel="noreferrer">Mapzen / Tilezen</a>（<a id="terrain-provider" href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noreferrer">USGS SRTM</a>）</span>
     </footer>
   </main>
 `;
@@ -158,7 +173,9 @@ const mapDialog = element<HTMLDialogElement>('campus-map-dialog');
 const mapDialogBody = element('map-dialog-body');
 const expandMapButton = element<HTMLButtonElement>('expand-map');
 const collapseMapButton = element<HTMLButtonElement>('collapse-map');
-const campusButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-campus]')];
+const schoolDialog = element<HTMLDialogElement>('school-dialog');
+const schoolList = element('school-list');
+const customSchoolForm = element<HTMLFormElement>('custom-school-form');
 
 let renderer: THREE.WebGLRenderer | null = null;
 let world: CampusWorld | null = null;
@@ -200,17 +217,15 @@ function updateCampusUI(definition: CampusDefinition, data?: CampusData): void {
   currentCampus.textContent = definition.name;
   mapCampus.textContent = definition.shortName;
   element('map-dialog-title').textContent = `${definition.shortName}校园地图`;
-  campusButtons.forEach((button) => {
-    const active = button.dataset.campus === definition.id;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', String(active));
-  });
-  const terrain = definition.id === 'clear-water-bay' ? data?.terrain : undefined;
+  const terrain = data?.terrain;
   const terrainStats = element('terrain-stats');
   terrainStats.hidden = !terrain;
   element('terrain-attribution').hidden = !terrain;
   if (terrain) {
-    terrainStats.textContent = `清水湾地形高程范围：${terrain.minElevation.toFixed(1)}–${terrain.maxElevation.toFixed(1)} 米（公开高程重采样）。`;
+    terrainStats.textContent = `${definition.shortName}地形高程范围：${terrain.minElevation.toFixed(1)}–${terrain.maxElevation.toFixed(1)} 米（公开高程重采样）。`;
+    const provider = element<HTMLAnchorElement>('terrain-provider');
+    const europe = terrain.attribution.includes('Copernicus');
+    provider.textContent = europe ? 'Copernicus EU-DEM' : 'USGS SRTM';
   }
   if (!data) return;
   element('data-stats').textContent = `${data.buildings.length} 栋建筑记录 · ${data.roads.length} 条道路 · ${data.trees.length} 处树木位置`;
@@ -221,7 +236,9 @@ function updateCampusUI(definition: CampusDefinition, data?: CampusData): void {
     : '建筑高度来源见原始数据。';
   element('start-description').textContent = definition.id === 'clear-water-bay'
     ? '在清水湾的山海之间，穿过象牙白建筑与蓝绿树影。'
-    : '沿着广州校区的轴线，在建筑、庭院与水岸间自由探索。';
+    : definition.id === 'guangzhou'
+      ? '沿着广州校区的轴线，在建筑、庭院与水岸间自由探索。'
+      : `在${definition.shortName}的建筑、道路与景观之间自由探索。`;
 }
 
 function setupRenderer(): void {
@@ -255,6 +272,7 @@ function showError(message: string, title = '校园资源加载失败'): void {
   element('error-message').textContent = message;
   setState('error');
   if (mapDialog.open) mapDialog.close();
+  if (schoolDialog.open) schoolDialog.close();
 }
 
 function openMap(): void {
@@ -286,7 +304,98 @@ mapDialog.addEventListener('click', (event) => {
 expandMapButton.addEventListener('click', openMap);
 collapseMapButton.addEventListener('click', () => mapDialog.close());
 
-async function selectCampus(definition: CampusDefinition): Promise<void> {
+function renderSchoolList(): void {
+  schoolList.replaceChildren();
+  const groups = [
+    { title: '内置学校', schools: CAMPUSES },
+    { title: '我的学校', schools: getCustomSchools() },
+  ];
+  for (const group of groups) {
+    const section = document.createElement('section');
+    section.className = 'school-group';
+    const heading = document.createElement('h3');
+    heading.textContent = `${group.title} · ${group.schools.length}`;
+    section.append(heading);
+    const grid = document.createElement('div');
+    grid.className = 'school-grid';
+    for (const school of group.schools) {
+      const card = document.createElement('article');
+      card.className = 'school-card';
+      const title = document.createElement('strong');
+      title.textContent = school.name;
+      const meta = document.createElement('span');
+      meta.textContent = school.custom ? '自定义 · 在线数据' : '内置 · 离线快照';
+      const select = document.createElement('button');
+      select.type = 'button';
+      select.className = 'school-select-button';
+      select.textContent = school.id === selected.id ? '当前学校' : '进入校园';
+      select.disabled = school.id === selected.id && Boolean(loadedCampus);
+      select.addEventListener('click', () => {
+        schoolDialog.close();
+        void selectCampus(school);
+      });
+      card.append(title, meta, select);
+      if (school.custom) {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'school-delete-button';
+        remove.textContent = '删除';
+        remove.setAttribute('aria-label', `删除${school.name}`);
+        remove.addEventListener('click', () => {
+          if (!window.confirm(`从本机列表删除“${school.name}”及其缓存？`)) return;
+          deleteCustomSchool(school.id);
+          renderSchoolList();
+          if (selected.id === school.id) void selectCampus(CAMPUSES[0]);
+        });
+        card.append(remove);
+      }
+      grid.append(card);
+    }
+    section.append(grid);
+    schoolList.append(section);
+  }
+  element('school-count').textContent = String(getAllSchools().length);
+}
+
+function openSchools(): void {
+  if (document.pointerLockElement) document.exitPointerLock();
+  renderSchoolList();
+  if (!schoolDialog.open) schoolDialog.showModal();
+}
+
+element('open-schools').addEventListener('click', openSchools);
+element('map-open-schools').addEventListener('click', openSchools);
+element('close-schools').addEventListener('click', () => schoolDialog.close());
+schoolDialog.addEventListener('click', (event) => {
+  if (event.target !== schoolDialog) return;
+  const bounds = schoolDialog.getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) schoolDialog.close();
+});
+
+customSchoolForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const form = new FormData(customSchoolForm);
+  const name = String(form.get('name') ?? '').trim();
+  const lat = Number(form.get('lat'));
+  const lon = Number(form.get('lon'));
+  const radius = Number(form.get('radius'));
+  if (!name || !Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radius)) return;
+  try {
+    const school = createCustomSchool(name, lat, lon, radius);
+    saveCustomSchool(school);
+    element('school-form-status').textContent = '学校已保存，正在在线获取数据。';
+    schoolDialog.close();
+    void selectCampus(school, true);
+  } catch (error) {
+    element('school-form-status').textContent = error instanceof Error ? error.message : '无法保存学校';
+  }
+});
+
+element('refresh-campus').addEventListener('click', () => {
+  if (selected.bbox) void selectCampus(selected, true);
+});
+
+async function selectCampus(definition: CampusDefinition, forceOnline = false): Promise<void> {
   selected = definition;
   updateCampusUI(definition);
   const sequence = ++loadSequence;
@@ -303,8 +412,14 @@ async function selectCampus(definition: CampusDefinition): Promise<void> {
   loadedCampus = null;
 
   try {
-    const data = await loadCampus(definition, abortController.signal);
+    const online = forceOnline || (definition.custom === true && !readCachedCampus(definition.id));
+    const data = online
+      ? await buildOnlineCampus(definition, abortController.signal, (message) => {
+        if (sequence === loadSequence) element('loading-detail').textContent = message;
+      })
+      : await loadCampus(definition, abortController.signal);
     if (sequence !== loadSequence) return;
+    if (online) cacheCampus(data);
     element('loading-detail').textContent = '构建建筑、道路与景观…';
     const nextWorld = new CampusWorld(data);
     await nextWorld.buildTrees();
@@ -370,19 +485,6 @@ retryButton.addEventListener('click', () => {
     }
   }
   void selectCampus(selected);
-});
-
-campusButtons.forEach((button) => {
-  button.addEventListener('click', () => {
-    const definition = CAMPUSES.find((campus) => campus.id === button.dataset.campus);
-    if (!definition) return;
-    if (definition.id === selected.id && loadedCampus && state !== 'error') {
-      if (document.pointerLockElement) document.exitPointerLock();
-      else if (!mapDialog.open && state === 'ready') void controller?.requestPlaying();
-      return;
-    }
-    void selectCampus(definition);
-  });
 });
 
 document.querySelector('.brand')?.addEventListener('click', (event) => {

@@ -1,4 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,6 +20,18 @@ const campuses = [
     name: 'HKUST(GZ)',
     boundaryId: 'way/894157108',
     bbox: [22.8829, 113.4708, 22.9008, 113.4874],
+  },
+  {
+    id: 'edinburgh',
+    name: 'University of Edinburgh',
+    boundaryId: 'way/9529767',
+    bbox: [55.9408, -3.1932, 55.9473, -3.1823],
+  },
+  {
+    id: 'cug-wuhan',
+    name: 'China University of Geosciences (Wuhan)',
+    boundaryId: 'relation/10790904',
+    bbox: [30.5165, 114.3893, 30.5341, 114.4044],
   },
 ];
 
@@ -41,6 +55,29 @@ async function isValidMetadata(file) {
   }
 }
 
+async function fetchText(url) {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'MyCampus-OSM-Pipeline/1.0 (educational campus visualization)',
+      },
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!response.ok) throw new Error(`OSM API returned ${response.status} ${response.statusText}`);
+    return await response.text();
+  } catch (error) {
+    console.warn(`Node fetch unavailable; retrying with curl: ${error.message}`);
+    const { stdout } = await promisify(execFile)('curl', [
+      '-fSsL', '--connect-timeout', '30', '--max-time', '180',
+      '-H', 'Accept: application/json',
+      '-H', 'User-Agent: MyCampus-OSM-Pipeline/1.0 (educational campus visualization)',
+      url,
+    ], { maxBuffer: 100 * 1024 * 1024 });
+    return stdout;
+  }
+}
+
 async function download(campus) {
   const [south, west, north, east] = campus.bbox;
   const url = `https://api.openstreetmap.org/api/0.6/map.json?bbox=${west},${south},${east},${north}`;
@@ -55,17 +92,7 @@ async function download(campus) {
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const response = await fetch(url, {
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': 'MyCampus-OSM-Pipeline/1.0 (educational campus visualization)',
-        },
-        signal: AbortSignal.timeout(120_000),
-      });
-      if (!response.ok) {
-        throw new Error(`OSM API returned ${response.status} ${response.statusText}`);
-      }
-      const body = await response.text();
+      const body = await fetchText(url);
       const snapshot = JSON.parse(body);
       if (!Array.isArray(snapshot.elements) || snapshot.elements.length === 0) {
         throw new Error('OSM response contains no elements');

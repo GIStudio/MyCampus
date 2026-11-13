@@ -1,0 +1,17 @@
+{
+  "id": "cug-wuhan",
+  "name": "China University of Geosciences (Wuhan)",
+  "source": "OpenStreetMap API 0.6 map.json",
+  "sourceUrl": "https://api.openstreetmap.org/api/0.6/map.json?bbox=114.3893,30.5165,114.4044,30.5341",
+  "fetchedAt": "2026-11-13T09:37:21.505Z",
+  "bbox": {
+    "south": 30.5165,
+    "west": 114.3893,
+    "north": 30.5341,
+    "east": 114.4044
+  },
+  "boundaryId": "relation/10790904",
+  "elementCount": 7185,
+  "osmBase": null,
+  "generator": "openstreetmap-cgimap 2.1.1 (2796519 spike-06.openstreetmap.org)"
+}

@@ -5,9 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const tileDir = path.join(root, 'data', 'terrain', 'tiles');
-const outputPath = path.join(root, 'data', 'terrain', 'clear-water-bay.terrain.json');
-const bbox = [22.3317, 114.2615, 22.3405, 114.27];
+const campuses = [
+  { id: 'clear-water-bay', bbox: [22.3317, 114.2615, 22.3405, 114.27], clampSeaLevel: true },
+  { id: 'edinburgh', bbox: [55.9408, -3.1932, 55.9473, -3.1823], clampSeaLevel: false, attribution: 'Produced using Copernicus data and information funded by the European Union - EU-DEM layers' },
+  { id: 'cug-wuhan', bbox: [30.5165, 114.3893, 30.5341, 114.4044], clampSeaLevel: false },
+];
 const zoom = 15;
 const tileSize = 256;
 const gridSpacing = 5;
@@ -19,13 +21,15 @@ assert(!(force && offline), '--force and --offline cannot be used together');
 const source = 'Mapzen/Tilezen Terrain Tiles (AWS Open Data)';
 const sourceUrl = 'https://registry.opendata.aws/terrain-tiles/';
 const tileUrl = (x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${x}/${y}.png`;
+const tileDir = path.join(root, 'data', 'terrain', 'tiles');
 const tilePath = (x, y) => path.join(tileDir, String(zoom), String(x), `${y}.png`);
+const outputPath = (id) => path.join(root, 'data', 'terrain', `${id}.terrain.json`);
 const rad = (degrees) => degrees * Math.PI / 180;
 const deg = (radians) => radians * 180 / Math.PI;
 const round = (value, digits = 3) => Math.round(value * 10 ** digits) / 10 ** digits;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function tileCoordinates() {
+function tileCoordinates(bbox) {
   const [south, west, north, east] = bbox;
   const scale = 2 ** zoom;
   const x = (lon) => Math.floor((lon + 180) / 360 * scale);
@@ -86,12 +90,12 @@ async function downloadTile(tile) {
   throw new Error(`Failed to download ${url}: ${lastError.message}`);
 }
 
-function cleanElevations(png) {
+function cleanElevations(png, clampSeaLevel) {
   const values = new Float64Array(tileSize * tileSize);
   for (let index = 0; index < values.length; index += 1) {
     const offset = index * 4;
     const elevation = png.data[offset] * 256 + png.data[offset + 1] + png.data[offset + 2] / 256 - 32768;
-    values[index] = elevation < -100 ? Number.NaN : Math.max(0, elevation);
+    values[index] = elevation < -100 ? Number.NaN : clampSeaLevel ? Math.max(0, elevation) : elevation;
   }
   let missing = values.filter(Number.isNaN).length;
   while (missing > 0) {
@@ -125,10 +129,6 @@ function cleanElevations(png) {
   return values;
 }
 
-function elevationAt(heights, x, y) {
-  return heights[y * tileSize + x];
-}
-
 function sampleTiles(tiles, lon, lat) {
   const scale = 2 ** zoom * tileSize;
   const globalX = (lon + 180) / 360 * scale;
@@ -145,12 +145,13 @@ function sampleTiles(tiles, lon, lat) {
   const y1 = Math.min(y0 + 1, tileSize - 1);
   const fx = localX - x0;
   const fy = localY - y0;
-  const north = elevationAt(png, x0, y0) * (1 - fx) + elevationAt(png, x1, y0) * fx;
-  const south = elevationAt(png, x0, y1) * (1 - fx) + elevationAt(png, x1, y1) * fx;
+  const at = (x, y) => png[y * tileSize + x];
+  const north = at(x0, y0) * (1 - fx) + at(x1, y0) * fx;
+  const south = at(x0, y1) * (1 - fx) + at(x1, y1) * fx;
   return north * (1 - fy) + south * fy;
 }
 
-function runtimeBounds() {
+function runtimeBounds(bbox) {
   const [south, west, north, east] = bbox;
   const origin = { lon: (west + east) / 2, lat: (south + north) / 2 };
   const project = ([lon, lat]) => [
@@ -167,67 +168,54 @@ function runtimeBounds() {
   };
 }
 
-function validateTerrain(terrain) {
-  assert.deepEqual(Object.keys(terrain).sort(), [
-    'attribution', 'columns', 'fetchedAt', 'heights', 'maxElevation', 'maxX', 'maxZ',
-    'minElevation', 'minX', 'minZ', 'rows', 'source', 'sourceUrl', 'tileUrls', 'zoom',
-  ].sort());
-  assert.equal(terrain.source, source);
-  assert.equal(terrain.sourceUrl, sourceUrl);
-  assert.equal(terrain.zoom, zoom);
-  assert(Number.isInteger(terrain.rows) && terrain.rows > 1);
-  assert(Number.isInteger(terrain.columns) && terrain.columns > 1);
-  assert.equal(terrain.heights.length, terrain.rows * terrain.columns);
+async function buildTerrain(campus) {
+  const coordinates = tileCoordinates(campus.bbox);
+  const downloads = await Promise.all(coordinates.map(downloadTile));
+  let fetchedAt = new Date().toISOString();
+  if (!downloads.some(Boolean)) {
+    try {
+      const previous = JSON.parse(await readFile(outputPath(campus.id), 'utf8'));
+      if (Array.isArray(previous.tileUrls) && previous.fetchedAt) fetchedAt = previous.fetchedAt;
+    } catch {
+    }
+  }
+  const decodedTiles = new Map(await Promise.all(coordinates.map(async (tile) => [
+    `${tile.x}/${tile.y}`,
+    cleanElevations(await readTile(tile.x, tile.y), campus.clampSeaLevel),
+  ])));
+  const { origin, ...bounds } = runtimeBounds(campus.bbox);
+  const columns = Math.round((bounds.maxX - bounds.minX) / gridSpacing) + 1;
+  const rows = Math.round((bounds.maxZ - bounds.minZ) / gridSpacing) + 1;
+  const heights = [];
+  for (let row = 0; row < rows; row += 1) {
+    const z = bounds.minZ + (bounds.maxZ - bounds.minZ) * row / (rows - 1);
+    const lat = origin.lat - deg(z / earthRadius);
+    for (let column = 0; column < columns; column += 1) {
+      const x = bounds.minX + (bounds.maxX - bounds.minX) * column / (columns - 1);
+      const lon = origin.lon + deg(x / (earthRadius * Math.cos(rad(origin.lat))));
+      heights.push(round(sampleTiles(decodedTiles, lon, lat), 1));
+    }
+  }
+  const terrain = {
+    source,
+    sourceUrl,
+    attribution: campus.attribution ?? 'SRTM data courtesy of the U.S. Geological Survey',
+    zoom,
+    tileUrls: coordinates.map((tile) => tileUrl(tile.x, tile.y)),
+    fetchedAt,
+    rows,
+    columns,
+    ...bounds,
+    minElevation: Math.min(...heights),
+    maxElevation: Math.max(...heights),
+    heights,
+  };
+  assert.equal(terrain.heights.length, rows * columns);
   assert(terrain.heights.every(Number.isFinite));
-  assert(terrain.minElevation >= -100 && terrain.maxElevation <= 500, 'Unexpected Clear Water Bay elevation range');
-  assert.equal(terrain.minElevation, Math.min(...terrain.heights));
-  assert.equal(terrain.maxElevation, Math.max(...terrain.heights));
-  assert(terrain.maxX > terrain.minX && terrain.maxZ > terrain.minZ);
+  assert(terrain.minElevation >= -500 && terrain.maxElevation <= 5000, `Unexpected ${campus.id} elevation range`);
+  await mkdir(path.dirname(outputPath(campus.id)), { recursive: true });
+  await writeFile(outputPath(campus.id), `${JSON.stringify(terrain)}\n`);
+  console.log(`${campus.id} terrain: ${rows} rows x ${columns} columns, ${terrain.minElevation} to ${terrain.maxElevation} m`);
 }
 
-const coordinates = tileCoordinates();
-const downloads = await Promise.all(coordinates.map(downloadTile));
-let fetchedAt = new Date().toISOString();
-if (!downloads.some(Boolean)) {
-  try {
-    const previous = JSON.parse(await readFile(outputPath, 'utf8'));
-    if (Array.isArray(previous.tileUrls) && previous.fetchedAt) fetchedAt = previous.fetchedAt;
-  } catch {
-  }
-}
-const decodedTiles = new Map(await Promise.all(coordinates.map(async (tile) => [
-  `${tile.x}/${tile.y}`,
-  cleanElevations(await readTile(tile.x, tile.y)),
-])));
-const { origin, ...bounds } = runtimeBounds();
-const columns = Math.round((bounds.maxX - bounds.minX) / gridSpacing) + 1;
-const rows = Math.round((bounds.maxZ - bounds.minZ) / gridSpacing) + 1;
-const heights = [];
-for (let row = 0; row < rows; row += 1) {
-  const z = bounds.minZ + (bounds.maxZ - bounds.minZ) * row / (rows - 1);
-  const lat = origin.lat - deg(z / earthRadius);
-  for (let column = 0; column < columns; column += 1) {
-    const x = bounds.minX + (bounds.maxX - bounds.minX) * column / (columns - 1);
-    const lon = origin.lon + deg(x / (earthRadius * Math.cos(rad(origin.lat))));
-    heights.push(round(sampleTiles(decodedTiles, lon, lat), 1));
-  }
-}
-
-const terrain = {
-  source,
-  sourceUrl,
-  attribution: 'SRTM data courtesy of the U.S. Geological Survey',
-  zoom,
-  tileUrls: coordinates.map((tile) => tileUrl(tile.x, tile.y)),
-  fetchedAt,
-  rows,
-  columns,
-  ...bounds,
-  minElevation: Math.min(...heights),
-  maxElevation: Math.max(...heights),
-  heights,
-};
-validateTerrain(terrain);
-await mkdir(path.dirname(outputPath), { recursive: true });
-await writeFile(outputPath, `${JSON.stringify(terrain)}\n`);
-console.log(`clear-water-bay terrain: ${rows} rows x ${columns} columns, ${terrain.minElevation} to ${terrain.maxElevation} m`);
+for (const campus of campuses) await buildTerrain(campus);

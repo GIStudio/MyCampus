@@ -217,6 +217,61 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .map-dialog .map-wrap { flex: 1; width: 100%; height: auto; min-height: 0; border-radius: 12px; }
 .map-dialog .map-caption { flex: none; margin: 12px 1px 0; font-size: 13px; }
 
+.school-directory-button, .online-refresh-button {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: var(--cyan-dark);
+  background: rgba(255,255,255,0.68);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.school-directory-button { min-width: 160px; padding: 0 18px; }
+.school-directory-button span { display: inline-grid; place-items: center; min-width: 23px; height: 23px; margin-left: 8px; border-radius: 7px; color: #fff; background: var(--cyan); font-size: 12px; }
+.online-refresh-button { padding: 0 12px; font-size: 13px; }
+.school-directory-button:hover, .online-refresh-button:hover { background: #fff; border-color: rgba(8,127,145,0.35); }
+.school-dialog {
+  width: 840px;
+  max-width: 82vw;
+  max-height: 82vh;
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.86);
+  border-radius: 22px;
+  color: var(--ink);
+  background: rgba(255,255,252,0.98);
+  box-shadow: 0 30px 90px rgba(18,43,49,0.28);
+}
+.school-dialog[open] { display: flex; flex-direction: column; }
+.school-dialog::backdrop { background: rgba(16,39,44,0.58); backdrop-filter: blur(6px); }
+.school-dialog-header { display: flex; align-items: center; justify-content: space-between; padding: 22px 26px 18px; border-bottom: 1px solid var(--line); }
+.school-dialog-header .eyebrow { margin-bottom: 5px; }
+.school-dialog-header h2 { margin: 0; font-size: 25px; letter-spacing: -0.03em; }
+.school-dialog-body { overflow-y: auto; padding: 22px 26px 26px; }
+.school-group + .school-group { margin-top: 24px; }
+.school-group h3 { margin: 0 0 11px; color: var(--muted); font-size: 13px; font-weight: 650; }
+.school-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.school-card { position: relative; display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; align-items: center; padding: 15px 16px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
+.school-card strong { font-size: 15px; line-height: 1.45; }
+.school-card > span { color: var(--muted); font-size: 12px; }
+.school-select-button { grid-column: 2; grid-row: 1 / 3; min-height: 36px; padding: 0 13px; border: 0; border-radius: 9px; color: #fff; background: var(--cyan); font-size: 13px; font-weight: 650; cursor: pointer; }
+.school-select-button:disabled { color: var(--muted); background: #edf1ed; cursor: default; }
+.school-delete-button { position: absolute; top: 7px; right: 8px; border: 0; color: #9a5149; background: transparent; font-size: 11px; cursor: pointer; }
+.school-card:has(.school-delete-button) strong { padding-right: 24px; }
+.school-card:has(.school-delete-button) .school-select-button { margin-top: 8px; }
+.custom-school-section { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
+.custom-school-section summary { color: var(--cyan-dark); font-size: 16px; font-weight: 700; cursor: pointer; }
+.custom-school-section > p { color: var(--muted); font-size: 13px; line-height: 1.65; }
+.custom-school-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px 16px; margin-top: 16px; }
+.custom-school-form label { display: grid; gap: 6px; color: #486067; font-size: 13px; font-weight: 600; }
+.custom-school-form input { width: 100%; min-height: 42px; padding: 8px 11px; border: 1px solid #c9d5d2; border-radius: 9px; color: var(--ink); background: #fff; font: inherit; }
+.custom-school-form input:focus { border-color: var(--cyan); outline: 3px solid rgba(8,127,145,0.12); }
+.school-name-field, .custom-school-form .primary-button, .school-form-status { grid-column: 1 / -1; }
+.custom-school-form .primary-button { margin-top: 4px; }
+.school-form-status { min-height: 18px; color: var(--muted); font-size: 13px; }
+
 .control-hints {
   position: absolute;
   z-index: 11;

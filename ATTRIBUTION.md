@@ -24,18 +24,32 @@
 - 获取时间：2026-11-13T05:36:43.622Z
 - 本地快照：`data/osm/guangzhou.osm.json`
 
-建筑高度优先使用 OSM `height`，其次按 `building:levels × 3m` 估算，最后使用建筑类型默认值。`source=generated` 的树木是确定性程序示意，不是测绘树位。广州校区使用平面地形，清水湾使用下述公开高程数据。
+### 爱丁堡大学
 
-## 清水湾地形
+- 校园边界：https://www.openstreetmap.org/way/9529767
+- 下载范围：-3.1932,55.9408,-3.1823,55.9473（西、南、东、北）
+- 本地快照：`data/osm/edinburgh.osm.json`
+
+### 中国地质大学（武汉）
+
+- 校园边界：https://www.openstreetmap.org/relation/10790904
+- 下载范围：114.3893,30.5165,114.4044,30.5341（西、南、东、北）
+- 本地快照：`data/osm/cug-wuhan.osm.json`
+
+建筑高度优先使用 OSM `height`，其次按 `building:levels × 3m` 估算，最后使用建筑类型默认值。`source=generated` 的树木是确定性程序示意，不是测绘树位。广州校区使用平面地形；清水湾、爱丁堡大学、中国地质大学（武汉）及在线自定义校区使用下述公开高程数据。
+
+## 地形数据
 
 - 数据集：Mapzen / Tilezen Terrain Tiles，由 AWS Open Data 托管
 - 数据集说明：https://registry.opendata.aws/terrain-tiles/
 - 来源与许可说明：https://github.com/tilezen/joerd/blob/master/docs/attribution.md
-- 高程署名：SRTM data courtesy of the U.S. Geological Survey
+- 清水湾与中国地质大学（武汉）：SRTM data courtesy of the U.S. Geological Survey
+- 爱丁堡大学：Produced using Copernicus data and information funded by the European Union - EU-DEM layers
 - 原始数据：zoom 15 Terrarium PNG，保存于 `data/terrain/tiles/`
-- 派生数据：`data/terrain/clear-water-bay.terrain.json`，获取时间记录于文件内
+- 派生数据：`data/terrain/<校区>.terrain.json`，获取时间记录于文件内
+- 在线自定义校区直接读取相同来源，并将构建结果缓存于当前浏览器
 
-原始 RGB 按 Terrarium 公式解码为米制高程，双线性重采样为约 5 米网格。异常深负值使用邻域插值修复，近海负高程归零；原始 PNG 不修改。运行时派生地形另外将建筑占地平整到由各轮廓原始高程中位数确定的基座，并在周边 8 米内平滑过渡；这些平台和过渡带不属于原始 SRTM 数据。该地形用于风格化漫游，不是测绘级地形或建筑基础高程。
+原始 RGB 按 Terrarium 公式解码为米制高程，内置校区双线性重采样为约 5 米网格，在线校区使用约 8 米网格。异常深负值使用邻域插值修复，清水湾近海负高程归零；原始 PNG 不修改。运行时派生地形另外将建筑占地平整到由各轮廓原始高程中位数确定的基座，并在周边 8 米内平滑过渡；这些平台和过渡带不属于原始 SRTM 数据。该地形用于风格化漫游，不是测绘级地形或建筑基础高程。
 
 ## 低模树木
 

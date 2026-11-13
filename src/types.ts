@@ -79,6 +79,8 @@ export interface CampusDefinition {
   name: string;
   shortName: string;
   dataPaths: string[];
+  bbox?: [number, number, number, number];
+  custom?: boolean;
 }
 
 export interface CollisionResult {
