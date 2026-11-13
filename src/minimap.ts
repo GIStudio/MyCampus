@@ -11,6 +11,8 @@ export class CampusMinimap {
   private offsetX = 0;
   private offsetY = 0;
   private pixelRatio = 1;
+  private width = SIZE;
+  private height = SIZE;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const context = canvas.getContext('2d');
@@ -20,22 +22,33 @@ export class CampusMinimap {
   }
 
   resize(): void {
+    const bounds = this.canvas.getBoundingClientRect();
+    this.width = Math.max(1, Math.round(bounds.width || SIZE));
+    this.height = Math.max(1, Math.round(bounds.height || SIZE));
     this.pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-    this.canvas.width = SIZE * this.pixelRatio;
-    this.canvas.height = SIZE * this.pixelRatio;
+    this.canvas.width = Math.round(this.width * this.pixelRatio);
+    this.canvas.height = Math.round(this.height * this.pixelRatio);
     this.staticMap.width = this.canvas.width;
     this.staticMap.height = this.canvas.height;
-    if (this.data) this.renderStatic();
+    if (this.data) {
+      this.updateProjection();
+      this.renderStatic();
+    }
   }
 
   setData(data: CampusData): void {
     this.data = data;
-    const width = data.bounds.maxX - data.bounds.minX;
-    const depth = data.bounds.maxZ - data.bounds.minZ;
-    this.scale = Math.min((SIZE - PADDING * 2) / width, (SIZE - PADDING * 2) / depth);
-    this.offsetX = (SIZE - width * this.scale) / 2 - data.bounds.minX * this.scale;
-    this.offsetY = (SIZE - depth * this.scale) / 2 + data.bounds.maxZ * this.scale;
+    this.updateProjection();
     this.renderStatic();
+  }
+
+  private updateProjection(): void {
+    if (!this.data) return;
+    const width = this.data.bounds.maxX - this.data.bounds.minX;
+    const depth = this.data.bounds.maxZ - this.data.bounds.minZ;
+    this.scale = Math.min((this.width - PADDING * 2) / width, (this.height - PADDING * 2) / depth);
+    this.offsetX = (this.width - width * this.scale) / 2 - this.data.bounds.minX * this.scale;
+    this.offsetY = (this.height - depth * this.scale) / 2 + this.data.bounds.maxZ * this.scale;
   }
 
   private project([x, z]: Point): Point {
@@ -59,9 +72,9 @@ export class CampusMinimap {
     const context = this.staticMap.getContext('2d');
     if (!context) return;
     context.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
-    context.clearRect(0, 0, SIZE, SIZE);
+    context.clearRect(0, 0, this.width, this.height);
     context.fillStyle = '#edf0e8';
-    context.fillRect(0, 0, SIZE, SIZE);
+    context.fillRect(0, 0, this.width, this.height);
 
     for (const area of this.data.areas) {
       context.fillStyle = area.kind === 'water'
@@ -128,7 +141,7 @@ export class CampusMinimap {
   update(x: number, z: number, rotation: number): void {
     if (!this.data) {
       this.context.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
-      this.context.clearRect(0, 0, SIZE, SIZE);
+      this.context.clearRect(0, 0, this.width, this.height);
       return;
     }
     this.context.setTransform(1, 0, 0, 1, 0, 0);

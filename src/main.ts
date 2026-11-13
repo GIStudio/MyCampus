@@ -47,10 +47,44 @@ app.innerHTML = `
     </header>
 
     <section class="minimap-panel" aria-label="校园小地图">
-      <div class="panel-heading"><span>校园导览</span><span class="north"><b>↑</b> N</span></div>
-      <div class="map-wrap"><canvas id="minimap" aria-label="显示建筑、道路和当前位置的小地图"></canvas></div>
-      <div class="map-caption"><span><i></i>当前位置</span><span id="map-campus">清水湾</span></div>
+      <div class="panel-heading">
+        <span>校园导览</span>
+        <div class="map-heading-actions">
+          <span class="north"><b>↑</b> N</span>
+          <button id="expand-map" class="map-toggle-button" type="button" aria-label="展开校园地图" aria-expanded="false" aria-controls="campus-map-dialog">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 3H3v4M13 3h4v4M7 17H3v-4M13 17h4v-4"/></svg>
+            <span>展开</span>
+          </button>
+        </div>
+      </div>
+      <div id="minimap-home">
+        <div id="map-content" class="map-content">
+          <div class="map-wrap"><canvas id="minimap" aria-label="显示建筑、道路和当前位置的小地图"></canvas></div>
+          <div class="map-caption"><span><i></i>当前位置</span><span id="map-campus">清水湾</span></div>
+        </div>
+      </div>
     </section>
+
+    <dialog id="campus-map-dialog" class="map-dialog" aria-labelledby="map-dialog-title">
+      <div class="map-dialog-header">
+        <div class="map-dialog-heading">
+          <h2 id="map-dialog-title">清水湾校园地图</h2>
+          <span class="north"><b>↑</b> N</span>
+        </div>
+        <nav class="campus-switch map-dialog-switch" aria-label="在大地图中切换校区">
+          ${CAMPUSES.map((campus, index) => `
+            <button type="button" class="campus-button${index === 0 ? ' active' : ''}" data-campus="${campus.id}" aria-pressed="${index === 0}">
+              <span class="campus-dot" aria-hidden="true"></span>${campus.shortName}
+            </button>
+          `).join('')}
+        </nav>
+        <button id="collapse-map" class="map-toggle-button map-collapse-button" type="button" aria-label="收起校园大地图" aria-controls="campus-map-dialog" autofocus>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7h4V3M17 7h-4V3M3 13h4v4M17 13h-4v4"/></svg>
+          <span>收起</span>
+        </button>
+      </div>
+      <div id="map-dialog-body" class="map-dialog-body"></div>
+    </dialog>
 
     <div class="control-hints" aria-label="操作提示">
       <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移动</span>
@@ -117,6 +151,12 @@ const currentCampus = element('current-campus');
 const mapCampus = element('map-campus');
 const notice = element('notice');
 const minimap = new CampusMinimap(element<HTMLCanvasElement>('minimap'));
+const minimapHome = element('minimap-home');
+const mapContent = element('map-content');
+const mapDialog = element<HTMLDialogElement>('campus-map-dialog');
+const mapDialogBody = element('map-dialog-body');
+const expandMapButton = element<HTMLButtonElement>('expand-map');
+const collapseMapButton = element<HTMLButtonElement>('collapse-map');
 const campusButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-campus]')];
 
 let renderer: THREE.WebGLRenderer | null = null;
@@ -158,6 +198,7 @@ function showNotice(message: string): void {
 function updateCampusUI(definition: CampusDefinition, data?: CampusData): void {
   currentCampus.textContent = definition.name;
   mapCampus.textContent = definition.shortName;
+  element('map-dialog-title').textContent = `${definition.shortName}校园地图`;
   campusButtons.forEach((button) => {
     const active = button.dataset.campus === definition.id;
     button.classList.toggle('active', active);
@@ -205,7 +246,37 @@ function showError(message: string, title = '校园资源加载失败'): void {
   element('error-title').textContent = title;
   element('error-message').textContent = message;
   setState('error');
+  if (mapDialog.open) mapDialog.close();
 }
+
+function openMap(): void {
+  if (mapDialog.open) return;
+  if (document.pointerLockElement) document.exitPointerLock();
+  mapDialogBody.append(mapContent);
+  expandMapButton.setAttribute('aria-expanded', 'true');
+  mapDialog.showModal();
+  minimap.resize();
+}
+
+mapDialog.addEventListener('close', () => {
+  if (mapDialog.open) return;
+  minimapHome.append(mapContent);
+  expandMapButton.setAttribute('aria-expanded', 'false');
+  minimap.resize();
+  if (state === 'error') retryButton.focus({ preventScroll: true });
+  else expandMapButton.focus({ preventScroll: true });
+});
+
+mapDialog.addEventListener('click', (event) => {
+  if (event.target !== mapDialog) return;
+  const bounds = mapDialog.getBoundingClientRect();
+  const inside = event.clientX >= bounds.left && event.clientX <= bounds.right
+    && event.clientY >= bounds.top && event.clientY <= bounds.bottom;
+  if (!inside) mapDialog.close();
+});
+
+expandMapButton.addEventListener('click', openMap);
+collapseMapButton.addEventListener('click', () => mapDialog.close());
 
 async function selectCampus(definition: CampusDefinition): Promise<void> {
   selected = definition;
@@ -299,7 +370,7 @@ campusButtons.forEach((button) => {
     if (!definition) return;
     if (definition.id === selected.id && loadedCampus && state !== 'error') {
       if (document.pointerLockElement) document.exitPointerLock();
-      else if (state === 'ready') void controller?.requestPlaying();
+      else if (!mapDialog.open && state === 'ready') void controller?.requestPlaying();
       return;
     }
     void selectCampus(definition);
